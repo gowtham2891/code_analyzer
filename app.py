@@ -9,16 +9,51 @@ from dotenv import load_dotenv
 import logging
 from datetime import datetime
 
-# Add this right after the imports
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - [%(name)s] - %(message)s',
     handlers=[
         logging.StreamHandler(),  # Print to console
         logging.FileHandler('codelens_activity.log')  # Save to file
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Create separate loggers for different types of events
+chat_logger = logging.getLogger('chat')
+code_logger = logging.getLogger('code')
+system_logger = logging.getLogger('system')
+
+# Configure chat logger to also write to a separate chat log file
+chat_handler = logging.FileHandler('chat_history.log')
+chat_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+chat_logger.addHandler(chat_handler)
+
+# Configure code logger to write to a separate code log file
+code_handler = logging.FileHandler('code_submissions.log')
+code_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(message)s\n'  # Add newline for better code separation
+))
+code_logger.addHandler(code_handler)
+
+
+def log_code_submission(username: str, code: str):
+    """Log code submission with proper formatting"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    separator = "=" * 50
+    
+    code_entry = f"""
+{separator}
+Timestamp: {timestamp}
+User: {username}
+Code Length: {len(code)} characters
+{separator}
+CODE:
+{code}
+{separator}
+"""
+    code_logger.info(code_entry)
+    logger.info(f"Code submission logged for user {username} - {len(code)} characters")
 
 
 
@@ -757,14 +792,15 @@ def authenticate_user():
             </div>
         """, unsafe_allow_html=True)
         
-        
         with st.container():
             username = st.text_input("Enter your name", key="auth_username")
             if st.button("Continue", type="primary"):
                 if username.strip():
                     st.session_state.authenticated = True
                     st.session_state.username = username
-                    logger.info(f"New user authenticated: {username}")
+                    system_logger.info(f"New user authenticated: {username}")
+                    chat_logger.info(f"=== New session started for user: {username} ===")
+                    code_logger.info(f"=== New session started for user: {username} ===")
                     st.rerun()
                 else:
                     st.error("Please enter your name to continue")
@@ -772,10 +808,14 @@ def authenticate_user():
     return True
 
 
+
 def process_code(code):
     try:
         llm = initialize_llm()
-        logger.info(f"User {st.session_state.username} submitted new code for analysis. Length: {len(code)} characters")
+        
+        # Log the code submission
+        log_code_submission(st.session_state.username, code)
+        
         explanation = analyze_code(code)
         if explanation:
             st.session_state.code_submitted = True
@@ -784,16 +824,26 @@ def process_code(code):
                 {"role": "user", "content": "Please analyze this code."},
                 {"role": "assistant", "content": explanation}
             ])
+            
+            # Log the initial code analysis conversation
+            chat_logger.info(f"USER ({st.session_state.username}): Please analyze this code.")
+            chat_logger.info(f"ASSISTANT: {explanation[:200]}... (truncated)")
+            
             st.session_state.conversation_history.extend(st.session_state.messages[-2:])
             st.balloons()
             st.rerun()
     except Exception as e:
-        logger.error(f"Error during code analysis for user {st.session_state.username}: {str(e)}")
+        error_msg = f"Error during code analysis for user {st.session_state.username}: {str(e)}"
+        logger.error(error_msg)
+        code_logger.error(error_msg)
         st.error(f"Error analyzing code: {str(e)}")
 
 
 def handle_chat_input(prompt):
+    # Log incoming user message
+    chat_logger.info(f"USER ({st.session_state.username}): {prompt}")
     logger.info(f"User {st.session_state.username} sent message: {prompt}")
+    
     st.session_state.messages.append({"role": "user", "content": prompt})
     
     with st.spinner("🤔 Thinking..."):
@@ -804,14 +854,19 @@ def handle_chat_input(prompt):
                 response = general_question(prompt)
                 
             if response:
+                # Log assistant's response
+                chat_logger.info(f"ASSISTANT: {response[:200]}... (truncated)")
+                logger.info(f"Generated response for user {st.session_state.username}")
+                
                 st.session_state.messages.append({
                     "role": "assistant", 
                     "content": response
                 })
                 st.rerun()
-                logger.info(f"Successfully generated response for user {st.session_state.username}")
         except Exception as e:
-            logger.error(f"Error generating response for user {st.session_state.username}: {str(e)}")
+            error_msg = f"Error generating response for user {st.session_state.username}: {str(e)}"
+            logger.error(error_msg)
+            chat_logger.error(error_msg)
             st.error("Failed to generate response. Please try again.")
 
     
