@@ -59,7 +59,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.markdown("<h1 style='padding: 1rem 0;'></h1>", unsafe_allow_html=True)
+st.markdown("""
+    <style>
+    /* Hides the Streamlit toolbar */
+    .stApp > header {
+        visibility: hidden;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 
 # Enhanced CSS with modern styling
