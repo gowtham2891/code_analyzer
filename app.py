@@ -10,38 +10,41 @@ import logging
 import json
 
 
-# Set up logging configuration
+
+# Configure logging with a more detailed format
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("code_wizard.log"),  # Save logs to a file
-        logging.StreamHandler()  # Ensure logs are captured in terminal
-    ]
+    format='%(asctime)s [%(levelname)s] %(message)s\n%(delimiter)s%(content)s%(delimiter)s\n',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger('CodeWizard')
 
-# Function to log user interactions with consistent formatting
-def log_interaction(username, interaction_type, content):
-    """Log user interactions with detailed formatting."""
-    log_message = f"{datetime.now().isoformat()} - {username} - {interaction_type}: {content}"
-    logger.info(log_message)
+# Add a custom logger adapter to handle multi-line content
+class ChatLogger(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        delimiter = kwargs.pop('delimiter', '-' * 80)
+        content = kwargs.pop('content', '')
+        formatted_msg = f"{msg}\n{delimiter}\n{content}\n{delimiter}"
+        return formatted_msg, kwargs
 
-# Function to log code submissions
-def log_code_submission(code: str, username: str):
+logger = ChatLogger(logger, {})
+
+def log_conversation(role: str, content: str):
+    """Log chat messages with proper formatting."""
+    logger.info(
+        f"Chat Message [{role}]",
+        delimiter='---Chat Begin---',
+        content=content
+    )
+
+def log_code_submission(code: str, user: str):
     """Log code submissions with proper formatting."""
-    logger.info(f"Code Submission from {username}")
-    logger.info("-" * 80)  # Delimiter
-    logger.info(code)
-    logger.info("-" * 80)  # Delimiter
-
-# Function to log analysis results
-def log_analysis(username: str, analysis_type: str, content: str):
-    """Log analysis results with proper formatting."""
-    logger.info(f"Analysis Result for {username} - Type: {analysis_type}")
-    logger.info("-" * 80)
-    logger.info(content)
-    logger.info("-" * 80)
+    logger.info(
+        f"Code Submission from {user}",
+        delimiter='---Code Begin---',
+        content=code
+    )
+    
     
 
 # Load environment variables
@@ -182,7 +185,7 @@ if 'user_name' not in st.session_state:
     st.session_state.user_name = None
 if 'session_start' not in st.session_state:
     st.session_state.session_start = datetime.now()
-    log_interaction("SYSTEM", "session_start", f"New session started at {st.session_state.session_start}")
+    logger.info(f"New session started at {st.session_state.session_start}")
 if 'questions_asked' not in st.session_state:
     st.session_state.questions_asked = 0
 if 'code_analyses' not in st.session_state:
@@ -207,14 +210,13 @@ def show_welcome_screen():
         if submitted:
             if len(name.strip()) >= 2:
                 st.session_state.user_name = name
-                log_interaction(name, "login", "User logged in successfully")
+                logger.info(f"New user logged in: {name}")
                 st.success(f"Welcome aboard, {name}! 🌟")
                 time.sleep(1)
                 st.rerun()
             else:
-                log_interaction("SYSTEM", "login_failed", "Invalid name attempt - less than 2 characters")
+                logger.warning("Invalid name attempt - less than 2 characters")
                 st.warning("🪄 Please enter a valid name (at least 2 characters)")
-
 
 def show_user_stats():
     """Display user session statistics and log detailed session information."""
@@ -275,7 +277,7 @@ def analyze_code(code: str, query: str = None, is_initial_analysis: bool = True)
         llm = initialize_llm()
         
         if is_initial_analysis:
-            log_interaction(st.session_state.user_name, "initial_analysis", "Starting initial code analysis")
+            logger.info(f"Starting initial code analysis for user: {st.session_state.user_name}")
             prompt_template = """
             As a coding expert, analyze this code:
             
@@ -293,8 +295,8 @@ def analyze_code(code: str, query: str = None, is_initial_analysis: bool = True)
             
             Make your explanation clear, engaging, and actionable, using emojis and formatting to enhance readability.
             """
-         else:
-            log_interaction(st.session_state.user_name, "follow_up_question", query)
+        else:
+            logger.info(f"Processing follow-up question: {query}")
             prompt_template = """
             Question about the code:
             ```
@@ -322,18 +324,11 @@ def analyze_code(code: str, query: str = None, is_initial_analysis: bool = True)
             "context": context
         })
         
-        # Log the analysis result
-        log_analysis(
-            st.session_state.user_name,
-            "initial_analysis" if is_initial_analysis else "follow_up",
-            response["text"]
-        )
-        
+        logger.info("Successfully generated analysis response")
         return response["text"]
     except Exception as e:
-        error_msg = f"Error in code analysis: {str(e)}"
-        logger.error(error_msg)
-        st.error(error_msg)
+        logger.error(f"Error in code analysis: {str(e)}")
+        st.error(f"Error in analysis: {str(e)}")
         return None
 
 def general_question(query: str):
@@ -361,31 +356,13 @@ def general_question(query: str):
         st.error(f"Error processing question: {str(e)}")
         return None
 
+
+# Main application flow
 def main():
     """Main application logic."""
-    logger.info("Starting Code Wizard application")
-    
     if not st.session_state.user_name:
         show_welcome_screen()
     else:
-        # Log session statistics periodically
-        session_stats = {
-            'user': st.session_state.user_name,
-            'duration_minutes': int((datetime.now() - st.session_state.session_start).total_seconds() / 60),
-            'questions_asked': st.session_state.questions_asked,
-            'code_analyses': st.session_state.code_analyses,
-            'session_start': st.session_state.session_start.isoformat(),
-            'chat_history_length': len(st.session_state.conversation_history)
-        }
-        logger.info(f"Session Statistics: {json.dumps(session_stats, indent=2)}")
-def main():
-    """Main application logic with comprehensive logging."""
-    logger.info("Starting Code Wizard application")
-    
-    if not st.session_state.user_name:
-        show_welcome_screen()
-    else:
-        # Display welcome header
         st.markdown(f"""
             <div style="text-align: center; margin-bottom: 2rem;">
                 <h1 class="welcome-title">Hello, {st.session_state.user_name}! 🌟</h1>
@@ -393,21 +370,9 @@ def main():
             </div>
         """, unsafe_allow_html=True)
         
-        # Log session statistics
-        session_duration = datetime.now() - st.session_state.session_start
-        session_stats = {
-            'user': st.session_state.user_name,
-            'duration_minutes': int(session_duration.total_seconds() / 60),
-            'questions_asked': st.session_state.questions_asked,
-            'code_analyses': st.session_state.code_analyses,
-            'session_start': st.session_state.session_start.isoformat(),
-            'chat_history_length': len(st.session_state.conversation_history)
-        }
-        logger.info(f"Current Session Statistics:\n{json.dumps(session_stats, indent=2)}")
-        
         show_user_stats()
         
-        # Main content area
+        # Main content
         if not st.session_state.code_submitted:
             st.markdown("### 📝 Let's analyze your code!")
             code_input = st.text_area(
@@ -418,21 +383,23 @@ def main():
             
             col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
+                # EDIT 1: Update the code analysis button section
                 if st.button("🔍 Analyze Code", type="primary", use_container_width=True):
                     if code_input.strip():
-                        # Log code submission
-                        log_interaction(st.session_state.user_name, "code_submission", "User submitted code for analysis")
+                        # Add logging for code submission
                         log_code_submission(code_input, st.session_state.user_name)
+                        logger.info(f"Starting code analysis for user: {st.session_state.user_name}")
                         
                         with st.spinner("🤖 Analyzing your code..."):
                             st.session_state.current_code = code_input
                             explanation = analyze_code(code_input, is_initial_analysis=True)
-                            
                             if explanation:
                                 st.session_state.code_submitted = True
-                                log_interaction(st.session_state.user_name, "analysis_complete", "Initial code analysis completed")
                                 
-                                # Update conversation history
+                                # Log the initial analysis request and response
+                                log_conversation("user", "Please analyze this code.")
+                                log_conversation("assistant", explanation)
+                                
                                 st.session_state.messages.append({
                                     "role": "user",
                                     "content": "Please analyze this code."
@@ -443,69 +410,58 @@ def main():
                                 })
                                 st.session_state.conversation_history.extend(st.session_state.messages[-2:])
                                 st.session_state.code_analyses += 1
-                                
-                                log_interaction(
-                                    st.session_state.user_name, 
-                                    "conversation_update",
-                                    "Added initial analysis to conversation history"
-                                )
+                                logger.info(f"Code analysis completed successfully for user: {st.session_state.user_name}")
                                 st.rerun()
                     else:
-                        log_interaction(st.session_state.user_name, "error", "Attempted to analyze empty code")
+                        logger.warning(f"User {st.session_state.user_name} attempted to analyze empty code")
                         st.warning("⚠️ Please enter some code before analysis.")
         else:
             # Code viewer with syntax highlighting
             with st.expander("📄 View Current Code", expanded=False):
                 st.code(st.session_state.current_code, language="python")
                 if st.button("📝 Submit New Code"):
-                    log_interaction(st.session_state.user_name, "action", "Requested to submit new code")
+                    logger.info(f"User {st.session_state.user_name} requested to submit new code")
                     st.session_state.code_submitted = False
                     st.rerun()
             
-            # Chat interface
+            # EDIT 2: Update the chat interface section
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
             
-            # Chat input
+            # EDIT 3: Update the chat input section
             if prompt := st.chat_input("💭 Ask me anything about the code..."):
-                log_interaction(st.session_state.user_name, "question", prompt)
+                # Log the user's question
+                log_conversation("user", prompt)
+                logger.info(f"New question received from {st.session_state.user_name}")
                 
                 st.session_state.messages.append({"role": "user", "content": prompt})
                 st.session_state.questions_asked += 1
                 
                 with st.spinner("🤔 Thinking..."):
                     if st.session_state.is_code_context:
-                        response = analyze_code(
-                            st.session_state.current_code,
-                            prompt,
-                            is_initial_analysis=False
-                        )
+                        response = analyze_code(st.session_state.current_code, prompt, is_initial_analysis=False)
                     else:
                         response = general_question(prompt)
                         
                     if response:
-                        log_interaction(
-                            st.session_state.user_name,
-                            "response",
-                            f"Generated response for: {prompt[:50]}..."
-                        )
+                        # Log the assistant's response
+                        log_conversation("assistant", response)
+                        logger.info(f"Generated response for user {st.session_state.user_name}'s question")
                         
                         st.session_state.messages.append({
                             "role": "assistant",
                             "content": response
                         })
-                        st.session_state.conversation_history.extend([
-                            {"role": "user", "content": prompt},
-                            {"role": "assistant", "content": response}
-                        ])
+                        st.session_state.conversation_history.append({
+                            "role": "assistant",
+                            "content": response
+                        })
                         st.rerun()
 
-        # Sidebar settings
+        # EDIT 4: Update the sidebar section
         with st.sidebar:
             st.markdown("### ⚙️ Settings")
-            
-            # Context mode toggle
             previous_context = st.session_state.is_code_context
             st.session_state.is_code_context = st.toggle(
                 "Code-specific questions",
@@ -513,39 +469,20 @@ def main():
                 help="Toggle between code-specific and general programming questions"
             )
             
-            # Log context mode changes
+            # Log when context mode changes
             if previous_context != st.session_state.is_code_context:
-                log_interaction(
-                    st.session_state.user_name,
-                    "settings_change",
-                    f"Changed context mode to: {'code-specific' if st.session_state.is_code_context else 'general'}"
-                )
+                logger.info(f"User {st.session_state.user_name} changed context mode to: {'code-specific' if st.session_state.is_code_context else 'general'}")
             
-            # Clear chat button
             if st.button("🗑️ Clear Chat"):
                 if st.session_state.messages:
-                    log_interaction(st.session_state.user_name, "action", "Cleared chat history")
-                    
-                    # Clear all session state variables
+                    logger.info(f"User {st.session_state.user_name} cleared chat history")
                     st.session_state.messages = []
                     st.session_state.code_submitted = False
                     st.session_state.current_code = ""
                     st.session_state.conversation_history = []
-                    
                     st.success("✨ Chat cleared!")
                     st.rerun()
-            
-            # Session end button
-            if st.button("🚪 End Session"):
-                log_interaction(st.session_state.user_name, "session_end", "User ended session")
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.rerun()
 
 if __name__ == "__main__":
-    try:
-        logger.info("Starting Code Wizard application")
-        main()
-    except Exception as e:
-        logger.error(f"Application error: {str(e)}", exc_info=True)
-        st.error("An unexpected error occurred. Please try again.")
+    logger.info("Starting Code Wizard application")
+    main()
