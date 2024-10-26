@@ -59,6 +59,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+st.markdown("<h1 style='padding: 1rem 0;'></h1>", unsafe_allow_html=True)
+
+
 # Enhanced CSS with modern styling
 st.markdown("""
 <style>
