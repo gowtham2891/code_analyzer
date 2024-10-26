@@ -53,7 +53,7 @@ GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 
 # Page configuration
 st.set_page_config(
-    page_title="✨ Code Wizard",
+    page_title="Code Wizard",
     page_icon="🪄",
     layout="wide",
     initial_sidebar_state="expanded"
