@@ -3,503 +3,164 @@ import streamlit as st
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
 from langchain.chains import LLMChain
-from langchain.memory import ConversationBufferMemory
-from dotenv import load_dotenv
-# Add this after your existing imports
-import logging
 from datetime import datetime
+import time
+from dotenv import load_dotenv
+import logging
+import json
 
+
+
+# Configure logging with a more detailed format
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - [%(name)s] - %(message)s',
-    handlers=[
-        logging.StreamHandler(),  # Print to console
-        logging.FileHandler('codelens_activity.log')  # Save to file
-    ]
+    format='%(asctime)s [%(levelname)s] %(message)s\n%(delimiter)s%(content)s%(delimiter)s\n',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('CodeWizard')
 
-# Create separate loggers for different types of events
-chat_logger = logging.getLogger('chat')
-code_logger = logging.getLogger('code')
-system_logger = logging.getLogger('system')
+# Add a custom logger adapter to handle multi-line content
+class ChatLogger(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        delimiter = kwargs.pop('delimiter', '-' * 80)
+        content = kwargs.pop('content', '')
+        formatted_msg = f"{msg}\n{delimiter}\n{content}\n{delimiter}"
+        return formatted_msg, kwargs
 
-# Configure chat logger to also write to a separate chat log file
-chat_handler = logging.FileHandler('chat_history.log')
-chat_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-chat_logger.addHandler(chat_handler)
+logger = ChatLogger(logger, {})
 
-# Configure code logger to write to a separate code log file
-code_handler = logging.FileHandler('code_submissions.log')
-code_handler.setFormatter(logging.Formatter(
-    '%(asctime)s - %(message)s\n'  # Add newline for better code separation
-))
-code_logger.addHandler(code_handler)
+def log_conversation(role: str, content: str):
+    """Log chat messages with proper formatting."""
+    logger.info(
+        f"Chat Message [{role}]",
+        delimiter='---Chat Begin---',
+        content=content
+    )
 
-
-def log_code_submission(username: str, code: str):
-    """Log code submission with proper formatting"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    separator = "=" * 50
+def log_code_submission(code: str, user: str):
+    """Log code submissions with proper formatting."""
+    logger.info(
+        f"Code Submission from {user}",
+        delimiter='---Code Begin---',
+        content=code
+    )
     
-    code_entry = f"""
-{separator}
-Timestamp: {timestamp}
-User: {username}
-Code Length: {len(code)} characters
-{separator}
-CODE:
-{code}
-{separator}
-"""
-    code_logger.info(code_entry)
-    logger.info(f"Code submission logged for user {username} - {len(code)} characters")
+    
 
-
+# Load environment variables
+load_dotenv()
+GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 
 # Page configuration
 st.set_page_config(
-    page_title="CodeLens AI",
-    page_icon="⚡",
+    page_title="✨ Code Wizard",
+    page_icon="🪄",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-load_dotenv()
-GROQ_API_KEY = os.getenv('GROQ_API_KEY')
-
-
+# Enhanced CSS with modern styling
 st.markdown("""
 <style>
-    /* CSS Reset and Variables */
-    :root {
-        --primary: #2563eb;
-        --primary-light: #3b82f6;
-        --primary-dark: #1d4ed8;
-        --secondary: #64748b;
-        --success: #059669;
-        --danger: #dc2626;
-        --warning: #d97706;
-        --background: #f8fafc;
-        --surface: #ffffff;
-        --text-primary: #1e293b;
-        --text-secondary: #64748b;
-        --border-radius: 12px;
-        --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    /* Global Styles */
+    /* Modern styling */
     .stApp {
-        background: var(--background);
+        background-color: #f8fafc;
     }
 
-    /* Typography System */
-    h1, h2, h3, h4, h5, h6 {
-        font-family: 'Inter', sans-serif;
-        color: var(--text-primary);
-        font-weight: 700;
-        letter-spacing: -0.025em;
-    }
-
-    p, span, div {
-        font-family: 'Inter', sans-serif;
-        color: var(--text-secondary);
-        line-height: 1.6;
-    }
-
-    /* Layout Components */
-    .main-container {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 2rem;
-    }
-
-    /* Card Component */
-    .card {
-        background: var(--surface);
-        border-radius: var(--border-radius);
-        padding: 1.5rem;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
-                    0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        transition: var(--transition);
-        position: relative;
-        overflow: hidden;
-    }
-
-    .card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
-                    0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    }
-
-    /* Hero Section */
-    .hero {
-        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-        padding: 4rem 2rem;
-        border-radius: var(--border-radius);
-        margin-bottom: 2rem;
-        position: relative;
-        overflow: hidden;
-    }
-
-    .hero::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ffffff" opacity="0.1" width="100" height="100"/></svg>');
-        opacity: 0.1;
-    }
-
-    .hero h1 {
-        color: white;
-        font-size: 2.5rem;
-        margin-bottom: 1rem;
-        animation: slideUp 0.6s ease-out;
-    }
-
-    .hero p {
-        color: rgba(255, 255, 255, 0.9);
-        font-size: 1.1rem;
-        max-width: 600px;
-        animation: slideUp 0.6s ease-out 0.1s;
-    }
-
-    /* Chat Interface */
-    .chat-container {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-        padding: 1rem;
-        height: 60vh;
-        overflow-y: auto;
-        background: rgba(255, 255, 255, 0.5);
-        backdrop-filter: blur(10px);
-        border-radius: var(--border-radius);
-        border: 1px solid rgba(0, 0, 0, 0.1);
-    }
-
-    .message {
-        max-width: 80%;
-        padding: 1rem;
-        border-radius: 1rem;
-        animation: messageSlide 0.3s ease-out;
-    }
-
-    .message.user {
-        background: var(--primary);
-        color: white;
-        margin-left: auto;
-        border-bottom-right-radius: 0.25rem;
-    }
-
-    .message.assistant {
-        background: var(--surface);
-        border: 1px solid rgba(0, 0, 0, 0.1);
-        margin-right: auto;
-        border-bottom-left-radius: 0.25rem;
-    }
-
-    /* Code Editor */
-    .code-editor {
-        background: #1e1e1e;
-        border-radius: var(--border-radius);
-        padding: 1rem;
-        position: relative;
-    }
-
-    .code-editor::before {
-        content: '• • •';
-        position: absolute;
-        top: 0.5rem;
-        left: 1rem;
-        color: #666;
-        letter-spacing: 2px;
-    }
-
-    /* Button Styles */
-    .stButton button {
-        width: 100%;
-        color: white !important;
-        background-color: var(--primary) !important;
-        padding: 0.75rem 1.5rem !important;
-        border-radius: var(--border-radius) !important;
-        border: none !important;
-        font-weight: 600 !important;
-        font-size: 1rem !important;
-    }
-
-    .stButton button:hover {
-        background-color: var(--primary-dark) !important;
-        color: white !important;
-        border: none !important;
-        transform: translateY(-2px);
-    }
-
-    /* Ensure text and emoji are visible */
-    .stButton button p {
-        color: white !important;
-        font-size: 1rem !important;
-        font-weight: 600 !important;
-    }
-
-    /* Streamlit specific overrides */
-    .stButton button:active, 
-    .stButton button:focus {
-        color: white !important;
-        background-color: var(--primary-dark) !important;
-        border-color: transparent !important;
-        box-shadow: none !important;
-    }
-
-    /* Maintain primary button original styles for other uses */
-    .primary-button {
-        background: var(--primary);
-        color: white;
-        padding: 0.75rem 1.5rem;
-        border-radius: var(--border-radius);
-        border: none;
-        font-weight: 600;
-        cursor: pointer;
-        transition: var(--transition);
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .primary-button:hover {
-        background: var(--primary-dark);
-        transform: translateY(-1px);
-    }
-
-    /* Input Fields */
-    .input-field {
-        width: 100%;
-        padding: 1rem;
-        border: 2px solid rgba(0, 0, 0, 0.1);
-        border-radius: var(--border-radius);
-        transition: var(--transition);
-        font-size: 1rem;
-        background: white;
-    }
-
-    .input-field:focus {
-        border-color: var(--primary);
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-        outline: none;
-    }
-
-    /* Loading States */
-    .loading {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.75rem 1.5rem;
-        border-radius: var(--border-radius);
-        background: rgba(37, 99, 235, 0.1);
-        color: var(--primary);
-        animation: pulse 2s infinite;
-    }
-
-    /* Badges */
-    .badge {
-        padding: 0.25rem 0.75rem;
-        border-radius: 9999px;
-        font-size: 0.875rem;
-        font-weight: 500;
-    }
-
-    .badge.success {
-        background: rgba(5, 150, 105, 0.1);
-        color: var(--success);
-    }
-
-    .badge.warning {
-        background: rgba(217, 119, 6, 0.1);
-        color: var(--warning);
-    }
-
-    /* Error Card */
-    .error-card {
-        background: #fee2e2;
-        border: 1px solid #ef4444;
-        border-radius: var(--border-radius);
-        padding: 1.5rem;
+    .welcome-container {
         text-align: center;
-        animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        padding: 2rem;
+        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+        border-radius: 1rem;
+        margin-bottom: 2rem;
+        animation: fadeIn 0.8s ease-out;
     }
 
-    .error-icon {
-        font-size: 2rem;
+    .welcome-title {
+        font-size: 2.5rem;
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
         margin-bottom: 1rem;
     }
 
-    /* Feature Cards */
-    .feature-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 1rem;
-        margin: 2rem 0;
-    }
-
-    .feature-card {
+    .stats-card {
         background: white;
+        border-radius: 1rem;
         padding: 1.5rem;
-        border-radius: var(--border-radius);
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        transition: var(--transition);
-    }
-
-    .feature-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-    }
-
-    /* Code Stats */
-    .code-stats {
-        display: flex;
-        gap: 1rem;
         margin: 1rem 0;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        transition: transform 0.3s ease;
+    }
+
+    .stats-card:hover {
+        transform: translateY(-5px);
     }
 
     .stat-item {
-        background: white;
-        padding: 1rem;
-        border-radius: var(--border-radius);
-        flex: 1;
+        display: inline-block;
+        margin: 0 1rem;
         text-align: center;
-        border: 1px solid rgba(0, 0, 0, 0.1);
-    }
-
-    .stat-value {
-        font-size: 1.5rem;
-        font-weight: bold;
-        color: var(--primary);
-    }
-
-    /* Toast Notifications */
-    .toast {
-        position: fixed;
-        bottom: 2rem;
-        right: 2rem;
-        padding: 1rem 2rem;
-        border-radius: var(--border-radius);
-        background: white;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-        animation: slideIn 0.3s ease-out;
-    }
-
-    .toast.success {
-        border-left: 4px solid var(--success);
-    }
-
-    .toast.error {
-        border-left: 4px solid var(--danger);
     }
 
     /* Animations */
-    @keyframes slideUp {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
     }
 
-    @keyframes messageSlide {
-        from {
-            opacity: 0;
-            transform: translateX(20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateX(0);
-        }
+    /* Code area styling */
+    .stTextArea textarea {
+        font-family: 'Courier New', Courier, monospace;
+        border-radius: 0.5rem;
+        border: 1px solid #e2e8f0;
+        padding: 1rem;
+        font-size: 0.9rem;
+        background-color: #f8fafc;
     }
 
-    @keyframes pulse {
-        0%, 100% {
-            opacity: 1;
-        }
-        50% {
-            opacity: 0.5;
-        }
+    .stTextArea textarea:focus {
+        border-color: #6366f1;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
     }
 
-    @keyframes shimmer {
-        0% {
-            background-position: -1000px 0;
-        }
-        100% {
-            background-position: 1000px 0;
-        }
+    /* Button styling */
+    .stButton button {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        color: white;
+        border: none;
+        padding: 0.5rem 2rem;
+        border-radius: 0.5rem;
+        font-weight: bold;
+        transition: all 0.3s ease;
     }
 
-    @keyframes shake {
-        10%, 90% { transform: translate3d(-1px, 0, 0); }
-        20%, 80% { transform: translate3d(2px, 0, 0); }
-        30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
-        40%, 60% { transform: translate3d(4px, 0, 0); }
+    .stButton button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.4);
     }
 
-    @keyframes slideIn {
-        from {
-            opacity: 0;
-            transform: translateX(100%);
-        }
-        to {
-            opacity: 1;
-            transform: translateX(0);
-        }
+    /* Additional styling for chat interface */
+    .chat-message {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        animation: fadeIn 0.5s ease-out;
     }
 
-    /* Responsive Design */
-    @media (max-width: 768px) {
-        .chat-container {
-            height: 70vh;
-        }
-
-        .message {
-            max-width: 90%;
-        }
-
-        .hero {
-            padding: 2rem 1rem;
-        }
-
-        .hero h1 {
-            font-size: 2rem;
-        }
+    .user-message {
+        background-color: #e0f2fe;
+        margin-left: 2rem;
     }
 
-    /* Custom Scrollbar */
-    ::-webkit-scrollbar {
-        width: 6px;
-    }
-
-    ::-webkit-scrollbar-track {
-        background: rgba(0, 0, 0, 0.1);
-        border-radius: 3px;
-    }
-
-    ::-webkit-scrollbar-thumb {
-        background: var(--primary);
-        border-radius: 3px;
+    .assistant-message {
+        background-color: #f0fdf4;
+        margin-right: 2rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Initializing session state
-# Add these with your other session state initializations
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-if 'username' not in st.session_state:
-    st.session_state.username = None
+# Initialize session state variables
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 if 'code_submitted' not in st.session_state:
@@ -510,79 +171,124 @@ if 'conversation_history' not in st.session_state:
     st.session_state.conversation_history = []
 if 'is_code_context' not in st.session_state:
     st.session_state.is_code_context = True
+if 'user_name' not in st.session_state:
+    st.session_state.user_name = None
+if 'session_start' not in st.session_state:
+    st.session_state.session_start = datetime.now()
+    logger.info(f"New session started at {st.session_state.session_start}")
+if 'questions_asked' not in st.session_state:
+    st.session_state.questions_asked = 0
+if 'code_analyses' not in st.session_state:
+    st.session_state.code_analyses = 0
+
+def show_welcome_screen():
+    """Display the welcome screen and handle user name input."""
+    st.markdown("""
+        <div class="welcome-container">
+            <h1 class="welcome-title">🪄 Welcome to Code Wizard</h1>
+            <p style="font-size: 1.2rem; color: #4b5563;">Your magical companion for code analysis and improvement</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    with st.form("welcome_form"):
+        name = st.text_input(
+            "🧙‍♂️ What's your name, fellow wizard?",
+            placeholder="Enter your name to begin..."
+        )
+        submitted = st.form_submit_button("✨ Begin Your Coding Journey", use_container_width=True)
+        
+        if submitted:
+            if len(name.strip()) >= 2:
+                st.session_state.user_name = name
+                logger.info(f"New user logged in: {name}")
+                st.success(f"Welcome aboard, {name}! 🌟")
+                time.sleep(1)
+                st.rerun()
+            else:
+                logger.warning("Invalid name attempt - less than 2 characters")
+                st.warning("🪄 Please enter a valid name (at least 2 characters)")
+
+def show_user_stats():
+    """Display user session statistics and log detailed session information."""
+    session_duration = datetime.now() - st.session_state.session_start
+    duration_mins = int(session_duration.total_seconds() / 60)
+    
+    # Log detailed session statistics
+    session_stats = {
+        'user': st.session_state.user_name,
+        'duration_minutes': duration_mins,
+        'questions_asked': st.session_state.questions_asked,
+        'code_analyses': st.session_state.code_analyses,
+        'session_start': st.session_state.session_start.isoformat(),
+        'chat_history_length': len(st.session_state.conversation_history)
+    }
+    
+    logger.info(
+        "Session Statistics",
+        delimiter='---Stats Begin---',
+        content=json.dumps(session_stats, indent=2)
+    )
+    
+    # Display stats in UI
+    st.markdown("""
+        <div class="stats-card">
+            <div class="stat-item">
+                <h3>⏱️ Session Duration</h3>
+                <p>{} mins</p>
+            </div>
+            <div class="stat-item">
+                <h3>❓ Questions Asked</h3>
+                <p>{}</p>
+            </div>
+            <div class="stat-item">
+                <h3>🔍 Code Analyses</h3>
+                <p>{}</p>
+            </div>
+        </div>
+    """.format(duration_mins, st.session_state.questions_asked, st.session_state.code_analyses), 
+    unsafe_allow_html=True)
 
 def initialize_llm():
-    """Initialize the LLM with error handling and status indicators"""
-    try:
-        if not GROQ_API_KEY:
-            st.error("""
-                <div class="error-card">
-                    <div class="error-icon">⚠️</div>
-                    <h3>API Key Missing</h3>
-                    <p>Please set your GROQ_API_KEY in the environment variables.</p>
-                </div>
-            """, unsafe_allow_html=True)
-            st.stop()
-        
-        return ChatGroq(
-            groq_api_key=GROQ_API_KEY,
-            model_name="mixtral-8x7b-32768",
-            temperature=0.7
-        )
-    except Exception as e:
-        st.error(f"Error initializing LLM: {str(e)}")
+    """Initialize and return the Groq LLM client."""
+    if not GROQ_API_KEY:
+        logger.error("GROQ_API_KEY not found in environment variables")
+        st.error("⚠️ GROQ_API_KEY not found. Please set it in your environment variables.")
         st.stop()
+    
+    return ChatGroq(
+        groq_api_key=GROQ_API_KEY,
+        model_name="mixtral-8x7b-32768",
+        temperature=0.7
+    )
 
 def analyze_code(code: str, query: str = None, is_initial_analysis: bool = True):
-    """Enhanced code analysis with better formatting and structure"""
+    """Analyze code using the Groq LLM."""
     try:
         llm = initialize_llm()
         
         if is_initial_analysis:
+            logger.info(f"Starting initial code analysis for user: {st.session_state.user_name}")
             prompt_template = """
-            Analyze this code with a professional and structured approach:
+            As a coding expert, analyze this code:
             
             ```
             {code}
             ```
             
-            Please provide a comprehensive analysis following this structure:
+            Provide a detailed yet engaging analysis including:
+            1. 🎯 Overview of what the code does
+            2. 🔍 Key components and their functionality
+            3. 💡 Notable programming concepts used
+            4. ⚡ Performance considerations
+            5. 🛡️ Security considerations if applicable
+            6. ✨ Potential improvements and best practices
             
-            ## 🎯 Overview
-            [Brief description of the code's purpose and functionality]
-            
-            ## 🔍 Key Components
-            - [Component 1]
-            - [Component 2]
-            ...
-            
-            ## 💡 Implementation Highlights
-            - [Notable feature 1]
-            - [Notable feature 2]
-            ...
-            
-            ## ⚡ Performance Analysis
-            - [Performance consideration 1]
-            - [Performance consideration 2]
-            ...
-            
-            ## 🛡️ Security Considerations
-            - [Security aspect 1]
-            
-            
-            - [Security aspect 2]
-            ...
-            
-            ## ✨ Recommendations
-            1. [Improvement suggestion 1]
-            2. [Improvement suggestion 2]
-            ...
-            
-            Use clear explanations and provide practical examples where relevant.
+            Make your explanation clear, engaging, and actionable, using emojis and formatting to enhance readability.
             """
         else:
+            logger.info(f"Processing follow-up question: {query}")
             prompt_template = """
-            Context: You're analyzing this code:
+            Question about the code:
             ```
             {code}
             ```
@@ -592,23 +298,15 @@ def analyze_code(code: str, query: str = None, is_initial_analysis: bool = True)
             Previous context:
             {context}
             
-            Please provide:
-            1. A direct answer to the question
-            2. Relevant code examples if applicable
-            3. Best practices and recommendations
-            4. Any potential gotchas or considerations
-            
-            Format your response with clear sections and use relevant emojis for better readability.
+            Provide a focused, clear answer with relevant code references and examples where applicable.
+            Use emojis and formatting to make the explanation more engaging.
             """
         
         prompt = ChatPromptTemplate.from_template(prompt_template)
         chain = LLMChain(llm=llm, prompt=prompt)
         
-      
-        context = "\n".join([
-            f"{msg['role']}: {msg['content']}" 
-            for msg in st.session_state.conversation_history[-3:]
-        ])
+        context = "\n".join([f"{msg['role']}: {msg['content']}" 
+                           for msg in st.session_state.conversation_history[-3:]])
         
         response = chain.invoke({
             "code": code,
@@ -616,316 +314,165 @@ def analyze_code(code: str, query: str = None, is_initial_analysis: bool = True)
             "context": context
         })
         
+        logger.info("Successfully generated analysis response")
         return response["text"]
     except Exception as e:
-        st.error(f"Analysis error: {str(e)}")
+        logger.error(f"Error in code analysis: {str(e)}")
+        st.error(f"Error in analysis: {str(e)}")
         return None
 
 def general_question(query: str):
-    """Handle general programming questions with enhanced formatting"""
+    """Handle general programming questions using the Groq LLM."""
     try:
+        logger.info(f"Processing general question: {query}")
         llm = initialize_llm()
         
         prompt_template = """
-        Answer this programming question with professional insight:
-        
+        Answer this programming question:
         Question: {query}
         
-        Please structure your response with:
-        1. A clear, direct answer
-        2. Practical examples and code snippets
-        3. Best practices and common pitfalls
-        4. Additional resources or related concepts
-        
-        Use appropriate formatting and emojis for better readability.
+        Provide a clear, comprehensive answer with examples where applicable.
+        Use emojis and formatting to make the explanation engaging.
         """
         
         prompt = ChatPromptTemplate.from_template(prompt_template)
         chain = LLMChain(llm=llm, prompt=prompt)
         
         response = chain.invoke({"query": query})
+        logger.info("Successfully generated response for general question")
         return response["text"]
     except Exception as e:
+        logger.error(f"Error processing general question: {str(e)}")
         st.error(f"Error processing question: {str(e)}")
         return None
 
-def display_feature_grid():
-    """Display key features in a grid layout"""
-    st.markdown("""
-        <div class="feature-grid">
-            <div class="feature-card">
-                <h3>🤖 AI-Powered Analysis</h3>
-                <p>Get instant insights into your code structure and quality</p>
-            </div>
-            <div class="feature-card">
-                <h3>📊 Performance Metrics</h3>
-                <p>Understand your code's efficiency and areas for improvement</p>
-            </div>
-            <div class="feature-card">
-                <h3>🛡️ Security Checks</h3>
-                <p>Identify potential security vulnerabilities</p>
-            </div>
-            <div class="feature-card">
-                <h3>💡 Smart Suggestions</h3>
-                <p>Receive personalized recommendations for better code</p>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
 
-def show_code_stats(code: str):
-    """Display code statistics in a visually appealing way"""
-    lines = len(code.split('\n'))
-    chars = len(code)
-    functions = len([line for line in code.split('\n') if 'def ' in line])
-    
-    st.markdown(f"""
-        <div class="code-stats">
-            <div class="stat-item">
-                <div class="stat-value">{lines}</div>
-                <div class="stat-label">Lines</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-value">{functions}</div>
-                <div class="stat-label">Functions</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-value">{chars}</div>
-                <div class="stat-label">Characters</div>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-
-def show_toast(message: str, type: str = "success"):
-    """Show a toast notification"""
-    st.markdown(f"""
-        <div class="toast {type}">
-            {message}
-        </div>
-    """, unsafe_allow_html=True)
-
-# Hero Section
-st.markdown("""
-    <div class="hero">
-        <h1>⚡ CodeLens AI</h1>
-        <p>Transform your code with AI-powered insights. Get instant analysis, suggestions, and answers to your programming questions.</p>
-    </div>
-""", unsafe_allow_html=True)
-
-def display_code_input():
-    st.markdown("""
-        <div class="card">
-            <h2>📝 Code Analysis</h2>
-            <p>Paste your code below and let AI analyze it for you.</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Add CSS to control the height of the code input area
-    st.markdown("""
-        <style>
-        .stTextArea textarea {
-            min-height: 300px !important;
-            background-color: #f8f9fa;
-            font-family: monospace;
-        }
-        
-        /* Hide empty code section */
-        .empty-code-section {
-            display: none;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-    
-    code_input = st.text_area(
-        "",
-        height=300,
-        key="code_input",
-        placeholder="// Paste your code here...",
-        help="Your code will be analyzed for patterns, best practices, and potential improvements."
-    )
-
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if st.button("🔍 Analyze Code", type="primary", use_container_width=True):
-            if code_input.strip():
-                with st.spinner("🤖 Analyzing code..."):
-                    process_code(code_input)
-            else:
-                st.warning("⚠️ Please enter some code to analyze.")
-                
-    # Only show code section if there's actual code
-    if st.session_state.get('current_code'):
-        with st.expander("📄 Current Code", expanded=False):
-            st.code(st.session_state.current_code, language="python")
-
-def display_chat_interface():
-    # Code viewer with syntax highlighting
-    with st.expander("📄 Current Code", expanded=False):
-        st.code(st.session_state.current_code, language="python")
-        if st.button("📝 New Code Analysis"):
-            st.session_state.code_submitted = False
-            st.rerun()
-
-    # Chat container
-    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-    
-    for msg in st.session_state.messages:
-        role_icon = "🧑‍💻" if msg["role"] == "user" else "🤖"
-        st.markdown(f"""
-            <div class="message {msg['role']}">
-                {role_icon} {msg['content']}
-            </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Chat input
-    if prompt := st.chat_input("💭 Ask a question about your code..."):
-        handle_chat_input(prompt)
-
-def authenticate_user():
-    """Handle user authentication"""
-    if not st.session_state.authenticated:
-        st.markdown("""
-            <div class="hero">
-                <h1>👋 Welcome to CodeLens AI</h1>
-                <p>Please enter your name to continue.</p>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        with st.container():
-            username = st.text_input("Enter your name", key="auth_username")
-            if st.button("Continue", type="primary"):
-                if username.strip():
-                    st.session_state.authenticated = True
-                    st.session_state.username = username
-                    system_logger.info(f"New user authenticated: {username}")
-                    chat_logger.info(f"=== New session started for user: {username} ===")
-                    code_logger.info(f"=== New session started for user: {username} ===")
-                    st.rerun()
-                else:
-                    st.error("Please enter your name to continue")
-        return False
-    return True
-
-
-
-def process_code(code):
-    try:
-        llm = initialize_llm()
-        
-        # Log the code submission
-        log_code_submission(st.session_state.username, code)
-        
-        explanation = analyze_code(code)
-        if explanation:
-            st.session_state.code_submitted = True
-            st.session_state.current_code = code
-            st.session_state.messages.extend([
-                {"role": "user", "content": "Please analyze this code."},
-                {"role": "assistant", "content": explanation}
-            ])
-            
-            # Log the initial code analysis conversation
-            chat_logger.info(f"USER ({st.session_state.username}): Please analyze this code.")
-            chat_logger.info(f"ASSISTANT: {explanation[:200]}... (truncated)")
-            
-            st.session_state.conversation_history.extend(st.session_state.messages[-2:])
-            st.balloons()
-            st.rerun()
-    except Exception as e:
-        error_msg = f"Error during code analysis for user {st.session_state.username}: {str(e)}"
-        logger.error(error_msg)
-        code_logger.error(error_msg)
-        st.error(f"Error analyzing code: {str(e)}")
-
-
-def handle_chat_input(prompt):
-    # Log incoming user message
-    chat_logger.info(f"USER ({st.session_state.username}): {prompt}")
-    logger.info(f"User {st.session_state.username} sent message: {prompt}")
-    
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    with st.spinner("🤔 Thinking..."):
-        try:
-            if st.session_state.is_code_context:
-                response = analyze_code(st.session_state.current_code, prompt, False)
-            else:
-                response = general_question(prompt)
-                
-            if response:
-                # Log assistant's response
-                chat_logger.info(f"ASSISTANT: {response[:200]}... (truncated)")
-                logger.info(f"Generated response for user {st.session_state.username}")
-                
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": response
-                })
-                st.rerun()
-        except Exception as e:
-            error_msg = f"Error generating response for user {st.session_state.username}: {str(e)}"
-            logger.error(error_msg)
-            chat_logger.error(error_msg)
-            st.error("Failed to generate response. Please try again.")
-
-    
-            
-
+# Main application flow
 def main():
-    if not authenticate_user():
-        return
-        
-    logger.info(f"User {st.session_state.username} accessed main interface")
-    if not st.session_state.get('current_code'):
-        display_feature_grid()
-        display_code_input()
+    """Main application logic."""
+    if not st.session_state.user_name:
+        show_welcome_screen()
     else:
-        display_chat_interface()
-        
-    # Footer
-    st.markdown("""
-        <div style="text-align: center; margin-top: 3rem; padding: 1rem; border-top: 1px solid rgba(0,0,0,0.1);">
-            <p>Made with ❤️ for developers everywhere</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-# Sidebar
-# In your sidebar section, add this at the top:
-with st.sidebar:
-    if st.session_state.authenticated:
         st.markdown(f"""
-            <div class="card">
-                <h3>👋 Welcome, {st.session_state.username}!</h3>
+            <div style="text-align: center; margin-bottom: 2rem;">
+                <h1 class="welcome-title">Hello, {st.session_state.user_name}! 🌟</h1>
+                <p style="font-size: 1.2rem; color: #4b5563;">Ready to make some coding magic? ✨</p>
             </div>
-        """, unsafe_allow_html=True)    
-    st.markdown("### 🔄 Question Mode")
-    st.session_state.is_code_context = st.toggle(
-        "Code-specific questions",
-        value=st.session_state.is_code_context,
-        help="Toggle between code-specific and general questions"
-    )
-    
-    if st.button("🗑️ Clear History", type="secondary"):
-        if st.session_state.messages:
-            if st.button("🚫 Confirm Clear"):
-                st.session_state.messages = []
-                st.session_state.code_submitted = False
-                st.session_state.current_code = ""
-                st.session_state.conversation_history = []
-                st.success("✨ History cleared!")
-                st.rerun()
+        """, unsafe_allow_html=True)
+        
+        show_user_stats()
+        
+        # Main content
+        if not st.session_state.code_submitted:
+            st.markdown("### 📝 Let's analyze your code!")
+            code_input = st.text_area(
+                "",
+                height=300,
+                placeholder="Paste your code here and let's make it better together! 🚀"
+            )
+            
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                # EDIT 1: Update the code analysis button section
+                if st.button("🔍 Analyze Code", type="primary", use_container_width=True):
+                    if code_input.strip():
+                        # Add logging for code submission
+                        log_code_submission(code_input, st.session_state.user_name)
+                        logger.info(f"Starting code analysis for user: {st.session_state.user_name}")
+                        
+                        with st.spinner("🤖 Analyzing your code..."):
+                            st.session_state.current_code = code_input
+                            explanation = analyze_code(code_input, is_initial_analysis=True)
+                            if explanation:
+                                st.session_state.code_submitted = True
+                                
+                                # Log the initial analysis request and response
+                                log_conversation("user", "Please analyze this code.")
+                                log_conversation("assistant", explanation)
+                                
+                                st.session_state.messages.append({
+                                    "role": "user",
+                                    "content": "Please analyze this code."
+                                })
+                                st.session_state.messages.append({
+                                    "role": "assistant",
+                                    "content": explanation
+                                })
+                                st.session_state.conversation_history.extend(st.session_state.messages[-2:])
+                                st.session_state.code_analyses += 1
+                                logger.info(f"Code analysis completed successfully for user: {st.session_state.user_name}")
+                                st.rerun()
+                    else:
+                        logger.warning(f"User {st.session_state.user_name} attempted to analyze empty code")
+                        st.warning("⚠️ Please enter some code before analysis.")
+        else:
+            # Code viewer with syntax highlighting
+            with st.expander("📄 View Current Code", expanded=False):
+                st.code(st.session_state.current_code, language="python")
+                if st.button("📝 Submit New Code"):
+                    logger.info(f"User {st.session_state.user_name} requested to submit new code")
+                    st.session_state.code_submitted = False
+                    st.rerun()
+            
+            # EDIT 2: Update the chat interface section
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+            
+            # EDIT 3: Update the chat input section
+            if prompt := st.chat_input("💭 Ask me anything about the code..."):
+                # Log the user's question
+                log_conversation("user", prompt)
+                logger.info(f"New question received from {st.session_state.user_name}")
+                
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                st.session_state.questions_asked += 1
+                
+                with st.spinner("🤔 Thinking..."):
+                    if st.session_state.is_code_context:
+                        response = analyze_code(st.session_state.current_code, prompt, is_initial_analysis=False)
+                    else:
+                        response = general_question(prompt)
+                        
+                    if response:
+                        # Log the assistant's response
+                        log_conversation("assistant", response)
+                        logger.info(f"Generated response for user {st.session_state.user_name}'s question")
+                        
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": response
+                        })
+                        st.session_state.conversation_history.append({
+                            "role": "assistant",
+                            "content": response
+                        })
+                        st.rerun()
 
-    with st.expander("ℹ️ Help"):
-        st.markdown("""
-            ### Quick Tips
-            1. 📝 Paste your code in the editor
-            2. 🔍 Get instant AI analysis
-            3. 💬 Ask specific questions
-            4. 🔄 Switch between modes
-            5. 📱 Works on all devices
-        """)
+        # EDIT 4: Update the sidebar section
+        with st.sidebar:
+            st.markdown("### ⚙️ Settings")
+            previous_context = st.session_state.is_code_context
+            st.session_state.is_code_context = st.toggle(
+                "Code-specific questions",
+                value=st.session_state.is_code_context,
+                help="Toggle between code-specific and general programming questions"
+            )
+            
+            # Log when context mode changes
+            if previous_context != st.session_state.is_code_context:
+                logger.info(f"User {st.session_state.user_name} changed context mode to: {'code-specific' if st.session_state.is_code_context else 'general'}")
+            
+            if st.button("🗑️ Clear Chat"):
+                if st.session_state.messages:
+                    logger.info(f"User {st.session_state.user_name} cleared chat history")
+                    st.session_state.messages = []
+                    st.session_state.code_submitted = False
+                    st.session_state.current_code = ""
+                    st.session_state.conversation_history = []
+                    st.success("✨ Chat cleared!")
+                    st.rerun()
 
 if __name__ == "__main__":
-    logger.info("Application started")
+    logger.info("Starting Code Wizard application")
     main()
