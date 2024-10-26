@@ -2,3 +2,4 @@ streamlit
 langchain_groq
 python-dotenv
 langchain
+streamlit-ace
