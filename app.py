@@ -474,29 +474,6 @@ def show_welcome_screen():
         st.error("An error occurred. Please try again.")
 
 
-def show_user_stats():
-    """Display user session statistics."""
-    session_duration = datetime.now() - st.session_state.session_start
-    duration_mins = int(session_duration.total_seconds() / 60)
-    
-    # Display stats in UI
-    st.markdown("""
-        <div class="stats-card">
-            <div class="stat-item">
-                <h3>⏱️ Session Duration</h3>
-                <p>{} mins</p>
-            </div>
-            <div class="stat-item">
-                <h3>❓ Questions Asked</h3>
-                <p>{}</p>
-            </div>
-            <div class="stat-item">
-                <h3>🔍 Code Analyses</h3>
-                <p>{}</p>
-            </div>
-        </div>
-    """.format(duration_mins, st.session_state.questions_asked, st.session_state.code_analyses), 
-    unsafe_allow_html=True)
 
 
 def get_llm_response(prompt_template: str, **kwargs) -> str:
@@ -684,7 +661,6 @@ def main():
         </div>
     """, unsafe_allow_html=True)
     
-    # show_user_stats()
     
     if not st.session_state.code_submitted:
         render_code_analysis_section()
