@@ -479,11 +479,12 @@ def show_user_stats():
     session_duration = datetime.now() - st.session_state.session_start
     duration_mins = int(session_duration.total_seconds() / 60)
     
+    # Display stats in UI
     st.markdown("""
         <div class="stats-card">
             <div class="stat-item">
                 <h3>⏱️ Session Duration</h3>
-                <p>{}</p>
+                <p>{} mins</p>
             </div>
             <div class="stat-item">
                 <h3>❓ Questions Asked</h3>
@@ -496,6 +497,7 @@ def show_user_stats():
         </div>
     """.format(duration_mins, st.session_state.questions_asked, st.session_state.code_analyses), 
     unsafe_allow_html=True)
+
 
 def get_llm_response(prompt_template: str, **kwargs) -> str:
     """Get response from LLM using the new LangChain syntax"""
