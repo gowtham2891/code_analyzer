@@ -684,7 +684,7 @@ def main():
         </div>
     """, unsafe_allow_html=True)
     
-    show_user_stats()
+    # show_user_stats()
     
     if not st.session_state.code_submitted:
         render_code_analysis_section()
